@@ -1,0 +1,108 @@
+---
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workload-ping-echo
+  labels:
+    name: workload-ping-echo
+    #istio-injection: enabled
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: echo
+  namespace: workload-ping-echo
+  labels:
+    app: echo
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: echo
+
+  template:
+    metadata:
+      labels:
+        app: echo
+
+    spec:
+      containers:
+      - name: echo
+        image: ghcr.io/arthursimas1/python-ping-echo:0.1.1
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - |
+          /sock_tcp_server.py 0.0.0.0 8080
+        ports:
+        - containerPort: 8080
+
+---
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: echo
+  namespace: workload-ping-echo
+
+spec:
+  type: ClusterIP
+  selector:
+    app: echo
+  ports:
+  - protocol: TCP
+    appProtocol: tcp
+    port: 8080
+    targetPort: 8080
+    appProtocol: tcp
+
+---
+
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: ping
+  namespace: workload-ping-echo
+  labels:
+    app: ping
+
+spec:
+  template:
+    metadata:
+      labels:
+        app: ping
+
+    spec:
+      restartPolicy: Never
+
+      initContainers:
+      - name: wait-for-echo
+        image: busybox:1.37.0
+        command: ['sh', '-c', 'until nc -z echo 8080; do echo waiting for echo; sleep 2; done']
+
+      containers:
+      - name: ping
+        image: ghcr.io/arthursimas1/python-ping-echo:0.1.1
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - |
+          /sock_tcp_client.py -s echo -p 8080 -x 5 -n 100000 -l /mnt/logs/ping
+        volumeMounts:
+        - name: logs
+          mountPath: /mnt/logs/ping
+
+      volumes:
+      - name: logs
+        hostPath:
+          path: /mnt/logs/ping
